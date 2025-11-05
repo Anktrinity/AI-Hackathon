@@ -1,548 +1,916 @@
-# Railway Migration Guide - AI Production Assistant v2
+# Railway Migration Guide - AI Task Manager
 
-Complete step-by-step guide to migrate your full-stack TypeScript application from Replit to Railway without breaking anything.
+**Migration Date:** November 5, 2025  
+**From:** Replit (isolated instances)  
+**To:** Railway (shared backend architecture)  
+**Goal:** Enable true Team Collaboration Mode with shared database
+
+---
+
+## 🎯 Migration Overview
+
+### What You're Building on Railway
+
+```
+┌─────────────────────────────────────────────────┐
+│           SHARED ARCHITECTURE ON RAILWAY         │
+├─────────────────────────────────────────────────┤
+│                                                  │
+│  Frontend (React + Vite)                        │
+│  ↓ HTTPS API calls                              │
+│  Backend API (Express + TypeScript)             │
+│  ↓ PostgreSQL queries                           │
+│  PostgreSQL Database (Railway Addon)            │
+│                                                  │
+│  ALL USERS → Same Backend → Same Database       │
+│                                                  │
+└─────────────────────────────────────────────────┘
+```
+
+### Key Differences from Replit
+
+| Aspect | Replit (Current) | Railway (Target) |
+|--------|-----------------|------------------|
+| Database | One per user instance | One shared database |
+| Backend API | One per user instance | One shared API service |
+| Team Collaboration | Impossible | Fully functional |
+| Deployment | Auto-restarts per instance | Single production deployment |
+| Cost | Per-instance compute | Shared compute resources |
 
 ---
 
 ## 📋 Pre-Migration Checklist
 
-Before starting, ensure you have:
-- [ ] Railway account created (https://railway.app)
-- [ ] GitHub account with repository access
-- [ ] All current environment variables from Replit
-- [ ] Database backup (if needed)
-- [ ] Stripe credentials
-- [ ] Slack OAuth credentials
-
----
-
-## 🎯 Cost Comparison
-
-**Replit**: ~$20-50/month for Hacker/Pro plans
-**Railway**:
-- $5/month Developer plan + usage-based pricing
-- First $5 credit free each month
-- Estimated: $5-15/month for your app size
-
----
-
-## 📦 PHASE 1: Prepare Your Repository
-
-### Step 1.1: Push Code to GitHub (if not already done)
-
-If your code is only on Replit:
+### 1. Gather Information from Replit
 
 ```bash
-# In Replit Shell
-git init
-git add .
-git commit -m "Initial commit - migrating to Railway"
-git branch -M main
-git remote add origin https://github.com/Anktrinity/AI-Production-Assistant_v2.git
-git push -u origin main
+# 1. List all environment variables
+# In Replit shell, run:
+env | grep -E "(DATABASE_URL|SLACK|STRIPE|SESSION)" > replit_env_backup.txt
+
+# 2. Export database schema
+npx drizzle-kit introspect
+
+# 3. Document current npm packages
+npm list --depth=0 > npm_packages.txt
 ```
 
-### Step 1.2: Add Railway Configuration Files
-
-Add these files to your repository root (ALREADY CREATED FOR YOU):
-
-1. **`railway.json`** ✅ Created
-2. **`nixpacks.toml`** ✅ Created
-3. **`.env.example`** ✅ Created
-
-### Step 1.3: Update .gitignore
-
-Ensure your `.gitignore` includes:
-
-```gitignore
-# Environment
-.env
-.env.local
-.env.production
-
-# Dependencies
-node_modules/
-
-# Build outputs
-dist/
-build/
-
-# Database
-*.db
-*.sqlite
-
-# Logs
-logs/
-*.log
-
-# IDE
-.vscode/
-.idea/
-
-# Replit specific
-.replit
-.config/
-.upm/
-```
-
-### Step 1.4: Commit and Push Configuration Files
+### 2. Save Important Data
 
 ```bash
-git add railway.json nixpacks.toml .env.example .gitignore
-git commit -m "Add Railway configuration files"
-git push origin main
+# If you have any tasks you want to preserve, export them:
+# In Replit shell:
+psql $DATABASE_URL -c "COPY tasks TO STDOUT CSV HEADER" > tasks_export.csv
+psql $DATABASE_URL -c "COPY app_users TO STDOUT CSV HEADER" > users_export.csv
 ```
+
+### 3. Download Full Codebase
+
+In Replit:
+1. Click "..." menu → "Download as zip"
+2. Extract locally for backup
+3. OR push to GitHub first (recommended)
 
 ---
 
-## 🚀 PHASE 2: Set Up Railway Project
+## 🚀 Railway Setup (Step-by-Step)
 
-### Step 2.1: Create New Railway Project
+### Step 1: Create Railway Account
 
 1. Go to https://railway.app
-2. Click **"New Project"**
-3. Select **"Deploy from GitHub repo"**
-4. Authenticate with GitHub
-5. Select repository: `Anktrinity/AI-Production-Assistant_v2`
-6. Railway will automatically detect it's a Node.js app
+2. Sign up with GitHub account
+3. Verify email if required
 
-### Step 2.2: Add PostgreSQL Database
+### Step 2: Create New Project
 
-1. In your Railway project dashboard, click **"+ New"**
-2. Select **"Database"** → **"Add PostgreSQL"**
-3. Railway will automatically:
-   - Create a PostgreSQL instance
-   - Generate connection credentials
-   - Add `DATABASE_URL` environment variable to your app
+1. Click "New Project"
+2. Select "Deploy from GitHub repo"
+3. **OPTION A:** Connect existing GitHub repo
+   - Authorize Railway to access your GitHub
+   - Select your repository
+4. **OPTION B:** Start empty and push code later
+   - Select "Empty Project"
+   - Note the project name
 
-**IMPORTANT**: Railway automatically connects your app to the database via `DATABASE_URL`.
+### Step 3: Add PostgreSQL Database
 
-### Step 2.3: Configure Environment Variables
+1. In your Railway project dashboard
+2. Click "+ New Service"
+3. Select "Database" → "PostgreSQL"
+4. Railway automatically provisions database
+5. Database will appear in your project with name like `postgres-production`
+6. Click on the database service
+7. Go to "Variables" tab
+8. Copy the `DATABASE_URL` (you'll need this)
 
-Click on your app service → **"Variables"** tab → Add these variables:
+### Step 4: Configure Backend Service
 
-#### Required Variables:
+1. Click "+ New Service" again
+2. Select "GitHub Repo" (if not already connected)
+3. Configure service settings:
 
-```bash
-# DATABASE (Auto-set by Railway when you add PostgreSQL)
+```yaml
+# railway.json (create this in project root)
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "numReplicas": 1,
+    "startCommand": "npm run start",
+    "restartPolicyType": "ON_FAILURE"
+  }
+}
+```
+
+4. Set environment variables in Railway dashboard:
+
+```env
+# Database (auto-configured by Railway)
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 
-# NODE ENVIRONMENT
+# Session
+SESSION_SECRET=<generate-new-random-string-32-chars>
 NODE_ENV=production
 
-# SESSION & AUTH (Generate secure random strings)
-SESSION_SECRET=<generate-64-char-random-string>
-JWT_SECRET=<generate-64-char-random-string>
+# Slack (copy from Replit)
+SLACK_BOT_TOKEN=<your-slack-bot-token>
+SLACK_APP_TOKEN=<your-slack-app-token>
+SLACK_SIGNING_SECRET=<your-slack-signing-secret>
 
-# SLACK OAUTH
-SLACK_CLIENT_ID=<your-slack-client-id>
-SLACK_CLIENT_SECRET=<your-slack-client-secret>
-SLACK_REDIRECT_URI=https://${{RAILWAY_PUBLIC_DOMAIN}}/auth/slack/callback
+# Stripe (copy from Replit)
+STRIPE_SECRET_KEY=<your-stripe-secret>
+VITE_STRIPE_PUBLIC_KEY=<your-stripe-public>
 
-# STRIPE
-STRIPE_SECRET_KEY=<your-stripe-secret-key>
-STRIPE_PUBLISHABLE_KEY=<your-stripe-publishable-key>
-STRIPE_WEBHOOK_SECRET=<your-stripe-webhook-secret>
+# Encryption
+ENCRYPTION_KEY=<generate-new-random-string-32-chars>
 
-# APP URLS
-FRONTEND_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
-BACKEND_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
+# Frontend URL (will update after frontend deployed)
+FRONTEND_URL=https://your-frontend.railway.app
 ```
 
-#### How to Generate Secure Secrets:
+### Step 5: Update package.json for Production
 
-```bash
-# In your terminal, run these commands:
-node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
-node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
-```
-
-Copy the outputs for `SESSION_SECRET` and `JWT_SECRET`.
-
-### Step 2.4: Update Slack OAuth Redirect URIs
-
-1. Go to https://api.slack.com/apps
-2. Select your Slack app
-3. Go to **"OAuth & Permissions"**
-4. Update **"Redirect URLs"** to include:
-   ```
-   https://your-railway-app.up.railway.app/auth/slack/callback
-   ```
-   (Replace with your actual Railway domain - found in Railway dashboard under "Settings" → "Domains")
-
-### Step 2.5: Update Stripe Webhook Endpoint
-
-1. Go to https://dashboard.stripe.com/webhooks
-2. Update your webhook endpoint URL to:
-   ```
-   https://your-railway-app.up.railway.app/api/webhooks/stripe
-   ```
-3. Copy the new **Webhook Signing Secret** and update `STRIPE_WEBHOOK_SECRET` in Railway
-
----
-
-## 🗄️ PHASE 3: Database Migration
-
-### Option A: Migrate from Neon to Railway PostgreSQL (RECOMMENDED)
-
-#### Step 3.1: Export Data from Neon
-
-```bash
-# In your local terminal (not Replit)
-# Install PostgreSQL client if not installed
-pg_dump "postgresql://user:password@ep-xxx.region.aws.neon.tech/database?sslmode=require" > backup.sql
-```
-
-#### Step 3.2: Import to Railway PostgreSQL
-
-1. In Railway, click on **PostgreSQL service** → **"Data"** tab → **"Query"**
-2. Or use the connection string from Railway:
-
-```bash
-# Get DATABASE_URL from Railway variables
-psql "postgresql://user:password@host.railway.internal:5432/railway" < backup.sql
-```
-
-#### Step 3.3: Run Drizzle Migrations
-
-Railway will automatically run your build, but to manually push schema:
-
-```bash
-# This will be done automatically on deploy via your build script
-npm run db:push
-```
-
-### Option B: Keep Using Neon Database (EASIER - NO MIGRATION)
-
-If you want to avoid database migration:
-
-1. **Keep** your current Neon database
-2. In Railway environment variables, use your **Neon connection string**:
-   ```
-   DATABASE_URL=postgresql://user:password@ep-xxx.region.aws.neon.tech/database?sslmode=require
-   ```
-3. Skip the data export/import steps
-4. Your app will connect to Neon from Railway
-
-**Pros**: No data migration, zero downtime
-**Cons**: Still paying for Neon separately (~$19/month for paid tier)
-
-**RECOMMENDATION**: For maximum cost savings, migrate to Railway PostgreSQL. For fastest migration with zero risk, keep Neon.
-
----
-
-## ⚙️ PHASE 4: Verify Build Configuration
-
-### Step 4.1: Check package.json Scripts
-
-Your current scripts are perfect for Railway:
+Add these scripts to your `package.json`:
 
 ```json
 {
   "scripts": {
-    "dev": "NODE_ENV=development tsx server/index.ts",
-    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "dev": "tsx watch server/index.ts",
+    "build": "vite build && tsc -p tsconfig.server.json",
     "start": "NODE_ENV=production node dist/index.js",
-    "check": "tsc",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
   }
 }
 ```
 
-✅ Railway will run `npm run build` (builds frontend + backend)
-✅ Railway will run `npm run start` (starts production server)
+### Step 6: Deploy Backend
 
-### Step 4.2: Verify Server Port Configuration
-
-Ensure your `server/index.ts` uses Railway's dynamic PORT:
-
-```typescript
-const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-```
-
-**IMPORTANT**: Railway sets `PORT` dynamically. Your code should read from `process.env.PORT`.
-
-### Step 4.3: Update Database Connection
-
-In your `drizzle.config.ts` or database connection file:
-
-```typescript
-import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
-
-// This works for both Neon and Railway PostgreSQL
-const sql = neon(process.env.DATABASE_URL!);
-export const db = drizzle(sql);
-```
-
-✅ This code works for both Neon and Railway PostgreSQL without changes.
-
----
-
-## 🚀 PHASE 5: Deploy to Railway
-
-### Step 5.1: Trigger First Deployment
-
-Railway automatically deploys when you:
-- Connect the GitHub repository
-- Push new commits
-
-Or manually:
-1. Go to Railway dashboard
-2. Click **"Deploy"** button
-3. Watch the build logs
-
-### Step 5.2: Monitor Build Logs
-
-Click on your deployment → **"Deployments"** tab → Select latest deployment → **"View Logs"**
-
-Watch for:
-- ✅ `npm ci` completes
-- ✅ `npm run build` completes
-- ✅ `vite build` succeeds
-- ✅ `esbuild` bundles server
-- ✅ Server starts on Railway's PORT
-- ❌ Any errors (see troubleshooting below)
-
-### Step 5.3: Generate Public Domain
-
-1. Click on your app service
-2. Go to **"Settings"** tab
-3. Under **"Domains"**, click **"Generate Domain"**
-4. Railway will create: `https://your-app-name.up.railway.app`
-
-Or add a custom domain:
-1. Click **"Custom Domain"**
-2. Enter your domain
-3. Add CNAME record to your DNS
-
----
-
-## ✅ PHASE 6: Testing & Validation
-
-### Step 6.1: Basic Health Check
-
-Visit your Railway URL:
-```
-https://your-app-name.up.railway.app
-```
-
-✅ Should see your React frontend load
-
-### Step 6.2: Test Database Connection
-
+1. Commit changes to GitHub:
 ```bash
-# In Railway dashboard, open "Query" for PostgreSQL
-SELECT * FROM app_users LIMIT 5;
+git add railway.json package.json
+git commit -m "Configure for Railway deployment"
+git push origin main
 ```
 
-✅ Should see your users table
+2. Railway auto-deploys on push
+3. Wait for build to complete (check logs)
+4. Click on backend service → "Settings" → "Generate Domain"
+5. Copy the backend URL (e.g., `https://your-backend.railway.app`)
 
-### Step 6.3: Test Authentication
+### Step 7: Configure Frontend Service
 
-1. Try logging in with Slack
-2. Verify session persistence
-3. Check JWT token generation
+1. Click "+ New Service" in Railway
+2. Select same GitHub repo
+3. Configure build settings:
 
-### Step 6.4: Test Stripe Integration
+**Root Directory:** `client` (if frontend is in subdirectory)  
+**OR** keep as root if using monorepo structure
 
-1. Create a test payment
-2. Verify webhook receives events
-3. Check database updates
-
-### Step 6.5: Test WebSocket Connections
-
-If your app uses WebSockets:
-1. Open browser DevTools → Network → WS
-2. Verify WebSocket connection establishes
-3. Test real-time updates
-
----
-
-## 🔧 PHASE 7: Optimization
-
-### Step 7.1: Set Up Health Checks
-
-Railway automatically health-checks your app. Optionally add a health endpoint:
-
-```typescript
-// In server/index.ts
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'healthy',
-    timestamp: new Date().toISOString()
-  });
-});
+**Build Command:**
+```bash
+npm run build
 ```
 
-Update `railway.json`:
+**Start Command:**
+```bash
+npx serve -s dist -l $PORT
+```
+
+4. Add to `package.json`:
 ```json
 {
-  "deploy": {
-    "healthcheckPath": "/health"
+  "scripts": {
+    "build:frontend": "vite build",
+    "preview": "vite preview"
   }
 }
 ```
 
-### Step 7.2: Configure Auto-Scaling (Optional)
+5. Set frontend environment variables:
 
-Railway automatically scales. To configure:
-1. Go to **"Settings"** → **"Deploy"**
-2. Set **"Instances"**: 1-3 (auto-scales on load)
-
-### Step 7.3: Set Up Monitoring
-
-Railway provides built-in metrics:
-1. Go to **"Metrics"** tab
-2. Monitor: CPU, Memory, Network
-3. Set up alerts for high resource usage
-
----
-
-## 🚨 Troubleshooting
-
-### Issue 1: Build Fails with "Module not found"
-
-**Cause**: Missing dependencies
-
-**Fix**:
-```bash
-# Make sure all deps are in package.json dependencies (not devDependencies)
-# For production builds, move build tools to dependencies:
-npm install --save-prod esbuild tsx typescript
-git commit -am "Move build tools to dependencies"
-git push
+```env
+VITE_API_URL=https://your-backend.railway.app
+VITE_STRIPE_PUBLIC_KEY=<your-stripe-public-key>
 ```
 
-### Issue 2: Server Doesn't Start - "Address already in use"
+### Step 8: Update Frontend API Calls
 
-**Cause**: Not using Railway's PORT variable
-
-**Fix**: In `server/index.ts`:
+**Current Code (Replit):**
 ```typescript
-const PORT = parseInt(process.env.PORT || '5000');
+// client/lib/queryClient.ts
+const API_BASE = ''; // Assumes same-origin
 ```
 
-### Issue 3: Database Connection Errors
-
-**Cause**: Wrong connection string
-
-**Fix**:
-1. Check Railway PostgreSQL variables
-2. Ensure `DATABASE_URL` is set
-3. Verify Neon/Railway connection string format
-4. Check for SSL requirements (Neon needs `?sslmode=require`)
-
-### Issue 4: Slack OAuth Fails
-
-**Cause**: Wrong redirect URI
-
-**Fix**:
-1. Update Slack app redirect URI to Railway domain
-2. Update `SLACK_REDIRECT_URI` in Railway variables
-3. Clear browser cookies and retry
-
-### Issue 5: Stripe Webhooks Not Working
-
-**Cause**: Wrong endpoint or signing secret
-
-**Fix**:
-1. Update Stripe webhook URL to Railway domain
-2. Get NEW webhook signing secret from Stripe dashboard
-3. Update `STRIPE_WEBHOOK_SECRET` in Railway
-
-### Issue 6: Frontend Shows "API Error" or CORS Issues
-
-**Cause**: Wrong FRONTEND_URL/BACKEND_URL
-
-**Fix**: Update Railway variables:
-```bash
-FRONTEND_URL=https://your-actual-domain.up.railway.app
-BACKEND_URL=https://your-actual-domain.up.railway.app
+**Updated Code (Railway):**
+```typescript
+// client/lib/queryClient.ts
+const API_BASE = import.meta.env.VITE_API_URL || '';
 ```
 
-### Issue 7: 502 Bad Gateway
+**Update all API calls:**
+```typescript
+// Before
+fetch('/api/tasks')
 
-**Cause**: Server not starting or crashing
+// After
+fetch(`${API_BASE}/api/tasks`)
+```
 
-**Fix**:
-1. Check logs: Deployment → View Logs
-2. Look for JavaScript errors
-3. Verify all environment variables are set
-4. Check database connection
+### Step 9: Enable CORS on Backend
 
----
+**Add to `server/index.ts`:**
 
-## 📊 Cost Monitoring
+```typescript
+import cors from 'cors';
 
-### Railway Pricing Breakdown
+const app = express();
 
-**Developer Plan**: $5/month includes:
-- $5 usage credit
-- Priority support
+// Add CORS middleware
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true
+}));
+```
 
-**Usage Costs**:
-- **CPU**: ~$0.000463/vCPU/minute
-- **Memory**: ~$0.000231/GB/minute
-- **Network**: Free egress up to 100GB
+**Install CORS:**
+```bash
+npm install cors
+npm install --save-dev @types/cors
+```
 
-**Your Estimated Monthly Cost**:
-- Small app (1 service + PostgreSQL): **$5-10/month**
-- Medium traffic: **$10-15/month**
-- High traffic: **$20-30/month**
+### Step 10: Run Database Migrations
 
-Still MUCH cheaper than Replit's $20-50/month!
-
-### Monitor Your Usage
-
-1. Railway dashboard → **"Usage"** tab
-2. View real-time costs
-3. Set up billing alerts
-
----
-
-## 🎯 Post-Migration Checklist
-
-After successful migration:
-
-- [ ] All features working on Railway
-- [ ] Database migrated and verified
-- [ ] Slack OAuth working
-- [ ] Stripe payments working
-- [ ] WebSockets connecting
-- [ ] Environment variables secured
-- [ ] Custom domain configured (optional)
-- [ ] Monitoring set up
-- [ ] Old Replit deployment stopped (cancel subscription)
-- [ ] Team notified of new URL
-- [ ] Documentation updated
-
----
-
-## 🔄 Continuous Deployment
-
-Railway automatically deploys when you push to GitHub:
+1. In Railway dashboard, click on backend service
+2. Go to "Settings" → "Service Variables"
+3. Copy the `DATABASE_URL`
+4. In your local terminal:
 
 ```bash
-# Make changes locally
-git add .
-git commit -m "Update feature"
+# Set DATABASE_URL locally
+export DATABASE_URL="<railway-database-url>"
+
+# Push schema to Railway database
+npm run db:push
+```
+
+### Step 11: Deploy Frontend
+
+1. Commit frontend changes:
+```bash
+git add client/lib/queryClient.ts
+git commit -m "Update API base URL for Railway"
 git push origin main
+```
 
-# Railway automatically:
-# 1. Detects push
-# 2. Runs build
-# 3. Deploys new version
-# 4. Zero-downtime rollout
+2. Railway auto-deploys
+3. Generate domain for frontend service
+4. Copy frontend URL
+
+### Step 12: Update Backend CORS
+
+1. Go to backend service in Railway
+2. Update environment variable:
+```env
+FRONTEND_URL=https://your-frontend.railway.app
+```
+
+3. Backend will auto-redeploy
+
+---
+
+## 🗄️ Database Schema Updates for Team Collaboration
+
+### Required Schema Changes
+
+Create a new migration file: `server/migrations/add_workspace_support.ts`
+
+```typescript
+import { pgTable, varchar, timestamp, boolean, text } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+
+// 1. Add workspaces table
+export const workspaces = pgTable('workspaces', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar('name').notNull(),
+  slug: varchar('slug').unique().notNull(),
+  ownerId: varchar('owner_id').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  settings: text('settings'), // JSON string for workspace settings
+});
+
+// 2. Add workspace_members table
+export const workspaceMembers = pgTable('workspace_members', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar('workspace_id').notNull(),
+  userId: varchar('user_id').notNull(),
+  email: varchar('email').notNull(),
+  role: varchar('role').notNull(), // 'owner', 'admin', 'member'
+  joinedAt: timestamp('joined_at').defaultNow(),
+});
+
+// 3. Update tasks table - add workspace_id
+// Add this column to existing tasks table
+ALTER TABLE tasks ADD COLUMN workspace_id VARCHAR;
+ALTER TABLE tasks ADD CONSTRAINT fk_workspace 
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id);
+```
+
+**Update `shared/schema.ts`:**
+
+```typescript
+export const workspaces = pgTable('workspaces', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar('name').notNull(),
+  slug: varchar('slug').unique().notNull(),
+  ownerId: varchar('owner_id').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  settings: text('settings'),
+});
+
+export const workspaceMembers = pgTable('workspace_members', {
+  id: varchar('id').primaryKey().default(sql`gen_random_uuid()`),
+  workspaceId: varchar('workspace_id').notNull().references(() => workspaces.id),
+  userId: varchar('user_id').notNull(),
+  email: varchar('email').notNull(),
+  role: varchar('role', { enum: ['owner', 'admin', 'member'] }).notNull(),
+  joinedAt: timestamp('joined_at').defaultNow().notNull(),
+});
+
+// Update tasks table
+export const tasks = pgTable('tasks', {
+  // ... existing fields ...
+  workspaceId: varchar('workspace_id').references(() => workspaces.id),
+  // ... rest of fields ...
+});
 ```
 
 ---
 
-## 📚 Additional Resources
+## 🔧 Code Updates for Shared Backend
+
+### 1. Update Task Routes for Multi-Tenancy
+
+**File: `server/task-routes.ts`**
+
+```typescript
+// Add workspace context to all queries
+router.get('/api/tasks', async (req, res) => {
+  const userId = req.user?.id;
+  const workspaceId = req.query.workspaceId as string;
+
+  if (!workspaceId) {
+    return res.status(400).json({ error: 'Workspace ID required' });
+  }
+
+  // Verify user is member of workspace
+  const membership = await db
+    .select()
+    .from(workspaceMembers)
+    .where(
+      and(
+        eq(workspaceMembers.workspaceId, workspaceId),
+        eq(workspaceMembers.userId, userId)
+      )
+    )
+    .limit(1);
+
+  if (membership.length === 0) {
+    return res.status(403).json({ error: 'Not authorized for this workspace' });
+  }
+
+  // Get tasks for workspace
+  const workspaceTasks = await db
+    .select()
+    .from(tasks)
+    .where(eq(tasks.workspaceId, workspaceId))
+    .orderBy(desc(tasks.createdAt));
+
+  res.json(workspaceTasks);
+});
+```
+
+### 2. Add Workspace Management Routes
+
+**Create: `server/workspace-routes.ts`**
+
+```typescript
+import { Router } from 'express';
+import { db } from './db';
+import { workspaces, workspaceMembers } from '../shared/schema';
+import { eq } from 'drizzle-orm';
+
+const router = Router();
+
+// Create workspace
+router.post('/api/workspaces', async (req, res) => {
+  const { name, slug } = req.body;
+  const userId = req.user?.id;
+  const userEmail = req.user?.email;
+
+  const workspace = await db.insert(workspaces).values({
+    name,
+    slug,
+    ownerId: userId,
+  }).returning();
+
+  // Add creator as owner
+  await db.insert(workspaceMembers).values({
+    workspaceId: workspace[0].id,
+    userId,
+    email: userEmail,
+    role: 'owner',
+  });
+
+  res.json(workspace[0]);
+});
+
+// Get user's workspaces
+router.get('/api/workspaces', async (req, res) => {
+  const userId = req.user?.id;
+
+  const userWorkspaces = await db
+    .select({
+      workspace: workspaces,
+      membership: workspaceMembers,
+    })
+    .from(workspaceMembers)
+    .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+    .where(eq(workspaceMembers.userId, userId));
+
+  res.json(userWorkspaces);
+});
+
+// Invite member to workspace
+router.post('/api/workspaces/:workspaceId/invite', async (req, res) => {
+  const { workspaceId } = req.params;
+  const { email, role } = req.body;
+  const userId = req.user?.id;
+
+  // Check if user is owner or admin
+  const membership = await db
+    .select()
+    .from(workspaceMembers)
+    .where(
+      and(
+        eq(workspaceMembers.workspaceId, workspaceId),
+        eq(workspaceMembers.userId, userId)
+      )
+    );
+
+  if (membership[0]?.role !== 'owner' && membership[0]?.role !== 'admin') {
+    return res.status(403).json({ error: 'Not authorized' });
+  }
+
+  // Add new member
+  await db.insert(workspaceMembers).values({
+    workspaceId,
+    userId: '', // Will be filled when user accepts invite
+    email,
+    role: role || 'member',
+  });
+
+  res.json({ success: true });
+});
+
+export default router;
+```
+
+### 3. Update Frontend for Workspace Selection
+
+**Create: `client/src/contexts/WorkspaceContext.tsx`**
+
+```typescript
+import { createContext, useContext, useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+
+interface Workspace {
+  id: string;
+  name: string;
+  slug: string;
+  role: string;
+}
+
+interface WorkspaceContextType {
+  currentWorkspace: Workspace | null;
+  setCurrentWorkspace: (workspace: Workspace) => void;
+  workspaces: Workspace[];
+}
+
+const WorkspaceContext = createContext<WorkspaceContextType | null>(null);
+
+export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
+  const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
+
+  const { data: workspaces = [] } = useQuery<Workspace[]>({
+    queryKey: ['/api/workspaces'],
+  });
+
+  useEffect(() => {
+    if (workspaces.length > 0 && !currentWorkspace) {
+      setCurrentWorkspace(workspaces[0]);
+    }
+  }, [workspaces]);
+
+  return (
+    <WorkspaceContext.Provider value={{ currentWorkspace, setCurrentWorkspace, workspaces }}>
+      {children}
+    </WorkspaceContext.Provider>
+  );
+}
+
+export function useWorkspace() {
+  const context = useContext(WorkspaceContext);
+  if (!context) throw new Error('useWorkspace must be used within WorkspaceProvider');
+  return context;
+}
+```
+
+### 4. Add Workspace Selector to UI
+
+**Update: `client/src/App.tsx`**
+
+```typescript
+import { WorkspaceProvider } from './contexts/WorkspaceContext';
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <WorkspaceProvider>
+        {/* existing routes */}
+      </WorkspaceProvider>
+    </QueryClientProvider>
+  );
+}
+```
+
+**Add selector to header:**
+
+```typescript
+// client/src/components/WorkspaceSelector.tsx
+import { useWorkspace } from '@/contexts/WorkspaceContext';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+export function WorkspaceSelector() {
+  const { currentWorkspace, workspaces, setCurrentWorkspace } = useWorkspace();
+
+  return (
+    <Select
+      value={currentWorkspace?.id}
+      onValueChange={(id) => {
+        const workspace = workspaces.find(w => w.id === id);
+        if (workspace) setCurrentWorkspace(workspace);
+      }}
+    >
+      <SelectTrigger className="w-[200px]">
+        <SelectValue placeholder="Select workspace" />
+      </SelectTrigger>
+      <SelectContent>
+        {workspaces.map(workspace => (
+          <SelectItem key={workspace.id} value={workspace.id}>
+            {workspace.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+```
+
+---
+
+## 🔐 Authentication Changes
+
+### Railway Doesn't Have Replit OIDC
+
+You need to replace Replit authentication with a different solution:
+
+### **Option 1: Email Magic Links (Recommended for MVP)**
+
+```bash
+npm install nodemailer jsonwebtoken
+```
+
+**Create: `server/magic-link-auth.ts`**
+
+```typescript
+import nodemailer from 'nodemailer';
+import jwt from 'jsonwebtoken';
+
+export async function sendMagicLink(email: string) {
+  const token = jwt.sign({ email }, process.env.SESSION_SECRET!, {
+    expiresIn: '15m'
+  });
+
+  const magicLink = `${process.env.FRONTEND_URL}/auth/verify?token=${token}`;
+
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT),
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM,
+    to: email,
+    subject: 'Sign in to AI Task Manager',
+    html: `
+      <h2>Welcome back!</h2>
+      <p>Click the link below to sign in:</p>
+      <a href="${magicLink}">Sign In</a>
+      <p>This link expires in 15 minutes.</p>
+    `,
+  });
+}
+```
+
+### **Option 2: Auth0 (Production Ready)**
+
+```bash
+npm install express-openid-connect
+```
+
+Setup at https://auth0.com and follow their Express quickstart.
+
+### **Option 3: Clerk (Easiest)**
+
+```bash
+npm install @clerk/clerk-sdk-node @clerk/clerk-react
+```
+
+Setup at https://clerk.com - provides ready-made UI components.
+
+---
+
+## 📤 Deploy Instructions
+
+### Using GitHub (Recommended)
+
+```bash
+# 1. Create GitHub repo
+git init
+git add .
+git commit -m "Initial commit for Railway"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/ai-task-manager.git
+git push -u origin main
+
+# 2. Connect Railway to GitHub
+# - In Railway dashboard
+# - Click "New Project" → "Deploy from GitHub"
+# - Select your repository
+# - Railway auto-deploys on every push
+```
+
+### Using Railway CLI
+
+```bash
+# 1. Install Railway CLI
+npm install -g @railway/cli
+
+# 2. Login
+railway login
+
+# 3. Initialize project
+railway init
+
+# 4. Link to project
+railway link
+
+# 5. Deploy
+railway up
+```
+
+---
+
+## 🧪 Testing After Migration
+
+### 1. Backend Health Check
+
+```bash
+curl https://your-backend.railway.app/health
+```
+
+Should return:
+```json
+{"status": "ok", "database": "connected"}
+```
+
+### 2. Frontend Load
+
+Visit: `https://your-frontend.railway.app`
+
+Should show login page or dashboard.
+
+### 3. Database Connection
+
+```bash
+# Connect to Railway database
+railway connect postgres
+
+# Check tables
+\dt
+
+# Check data
+SELECT COUNT(*) FROM tasks;
+```
+
+### 4. End-to-End Test
+
+1. Create workspace
+2. Invite team member
+3. Create task in workspace
+4. Verify other member can see task
+5. Reassign task
+6. Delete task
+
+---
+
+## 💾 Data Migration from Replit
+
+### Export from Replit
+
+```bash
+# Connect to Replit database
+psql $DATABASE_URL
+
+# Export tables
+\copy app_users TO 'app_users.csv' CSV HEADER;
+\copy tasks TO 'tasks.csv' CSV HEADER;
+\copy slack_users TO 'slack_users.csv' CSV HEADER;
+```
+
+### Import to Railway
+
+```bash
+# Connect to Railway database
+railway connect postgres
+
+# Import tables
+\copy app_users FROM 'app_users.csv' CSV HEADER;
+\copy tasks FROM 'tasks.csv' CSV HEADER;
+\copy slack_users FROM 'slack_users.csv' CSV HEADER;
+```
+
+**Important:** Update task records to add `workspace_id`:
+
+```sql
+-- Create Wellness Awards workspace
+INSERT INTO workspaces (name, slug, owner_id)
+VALUES ('Wellness Awards 2025', 'wellness-awards-2025', '<treefanevents-user-id>')
+RETURNING id;
+
+-- Update all wellness tasks to belong to this workspace
+UPDATE tasks
+SET workspace_id = '<workspace-id-from-above>'
+WHERE template_id = 'wellness-awards';
+```
+
+---
+
+## 🎯 Post-Migration Tasks
+
+### 1. Add Missing Features
+
+```bash
+# Tasks to implement after migration:
+- [ ] Task edit modal on Tasks page
+- [ ] Delete buttons on Tasks page
+- [ ] Reassign task functionality
+- [ ] Workspace member management UI
+- [ ] Invite team members flow
+- [ ] Role-based permissions
+```
+
+### 2. Fix Data Quality
+
+```sql
+-- Clean up assignee names
+UPDATE tasks
+SET assignee_name = NULL
+WHERE assignee_name = 'Anca Platon Trifan'
+  AND assignee_email != 'anca@example.com';
+```
+
+### 3. Set Up Monitoring
+
+Railway provides built-in monitoring:
+- Click on service → "Metrics"
+- Set up alerts for errors
+- Monitor response times
+
+### 4. Configure Custom Domain (Optional)
+
+1. In Railway service → "Settings" → "Domains"
+2. Click "Add Domain"
+3. Enter your domain (e.g., `aitaskmanager.pro`)
+4. Update DNS records as shown
+5. Wait for SSL certificate provisioning
+
+---
+
+## 💰 Railway Pricing Estimate
+
+### Free Tier
+- $5 free credit monthly
+- Good for testing/development
+- Limited hours
+
+### Paid Plans
+- **Hobby Plan**: $5/month + usage
+  - Suitable for small teams
+  - Includes PostgreSQL
+  - Estimated: $10-20/month for your use case
+
+- **Pro Plan**: $20/month + usage
+  - Better for production
+  - Priority support
+  - Estimated: $30-50/month
+
+**Compare to Replit:** Likely 50-70% cost reduction for team collaboration.
+
+---
+
+## 🆘 Troubleshooting
+
+### Build Fails on Railway
+
+```bash
+# Check build logs in Railway dashboard
+# Common issues:
+
+# 1. Missing dependencies
+npm install
+
+# 2. TypeScript errors
+npx tsc --noEmit
+
+# 3. Environment variables missing
+# Add in Railway dashboard → Service → Variables
+```
+
+### Database Connection Issues
+
+```env
+# Ensure DATABASE_URL format is correct
+DATABASE_URL=postgresql://user:password@host:port/database?sslmode=require
+```
+
+### CORS Errors
+
+```typescript
+// server/index.ts
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'https://your-frontend.railway.app'
+  ],
+  credentials: true
+}));
+```
+
+### Authentication Not Working
+
+```typescript
+// Check session configuration
+app.use(session({
+  secret: process.env.SESSION_SECRET,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in prod
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    domain: process.env.NODE_ENV === 'production' ? '.railway.app' : undefined
+  }
+}));
+```
+
+---
+
+## 📞 Support Resources
 
 - Railway Docs: https://docs.railway.app
 - Railway Discord: https://discord.gg/railway
@@ -550,40 +918,27 @@ git push origin main
 
 ---
 
-## ⚡ Quick Migration Summary
+## ✅ Final Checklist
 
-**Fastest Path** (30 minutes):
+Before going live:
 
-1. Create Railway project from GitHub repo
-2. Add PostgreSQL database
-3. Copy all environment variables from Replit to Railway
-4. Update Slack redirect URI
-5. Update Stripe webhook URL
-6. Deploy and test
-
-**Safest Path** (2 hours):
-
-1. Keep Neon database (no migration)
-2. Set up Railway with all configs
-3. Deploy to Railway
-4. Test thoroughly in parallel with Replit
-5. Switch DNS/traffic when confident
-6. Decommission Replit
+- [ ] Backend deployed and healthy
+- [ ] Frontend deployed and loading
+- [ ] Database connected and migrated
+- [ ] Authentication working
+- [ ] Environment variables set
+- [ ] CORS configured
+- [ ] Workspace system functional
+- [ ] Team members can collaborate
+- [ ] Slack integration working
+- [ ] Custom domain configured (optional)
+- [ ] Monitoring set up
+- [ ] Data backup plan in place
 
 ---
 
-## 🎉 Success Criteria
+**Migration Complete!** 🎉
 
-Your migration is complete when:
+You now have a true shared backend where all team members can collaborate on the same workspace.
 
-✅ App loads at Railway URL
-✅ Users can log in with Slack
-✅ Database queries work
-✅ Payments process via Stripe
-✅ WebSockets connect
-✅ All features match Replit version
-✅ No console errors
-✅ Response times < 500ms
-✅ Cost reduced by 50%+
-
-**Congratulations! You've successfully migrated to Railway!** 🚀
+Next steps: Implement Option B features (edit, reassign, bulk operations) on the new platform.
